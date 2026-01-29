@@ -1,75 +1,139 @@
-function login() {
-    fetch("/api/login", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            username: loginUser.value,
-            password: loginPass.value
-        })
-    })
-    .then(r=>r.json())
-    .then(d=>{
-        if(d.role) init(d.role);
-        else loginError.innerText="Erreur";
+// ================== ELEMENTS ==================
+const loginForm = document.getElementById("loginForm");
+const usernameInput = document.getElementById("username");
+const passwordInput = document.getElementById("password");
+
+const userInfo = document.getElementById("userInfo");
+const roleSpan = document.getElementById("role");
+const logoutBtn = document.getElementById("logoutBtn");
+
+const addForm = document.getElementById("addForm");
+const list = document.getElementById("list");
+
+// Champs ajout pièce
+const identifiant = document.getElementById("identifiant");
+const type = document.getElementById("type");
+const statut = document.getElementById("statut");
+const localisation = document.getElementById("localisation");
+const date = document.getElementById("date");
+const origine = document.getElementById("origine");
+const taux = document.getElementById("taux");
+const commentaire = document.getElementById("commentaire");
+
+// ================== AUTH ==================
+function checkMe() {
+  fetch("/api/me")
+    .then(r => r.json())
+    .then(data => {
+      if (!data.role) {
+        userInfo.style.display = "none";
+        addForm.style.display = "none";
+      } else {
+        userInfo.style.display = "block";
+        roleSpan.textContent = data.role;
+
+        // MAINT uniquement
+        if (data.role === "MAINT") {
+          addForm.style.display = "block";
+        } else {
+          addForm.style.display = "none";
+        }
+
+        loadPieces();
+        loadIndicateurs();
+      }
     });
 }
 
-function logout(){ fetch("/api/logout").then(()=>location.reload()); }
-
-function init(role){
-    loginCard.style.display="none";
-    appContent.style.display="block";
-    roleDisplay.innerText=role;
-    maintenanceBlock.style.display= role==="MAINT" ? "block":"none";
-    load();
-}
-
-fetch("/api/me").then(r=>r.json()).then(d=>{ if(d.role) init(d.role); });
-
-pieceForm?.addEventListener("submit",e=>{
+if (loginForm) {
+  loginForm.onsubmit = (e) => {
     e.preventDefault();
-    fetch("/api/piece",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            identifiant: identifiant.value,
-            type_piece: type_piece.value,
-            statut: statut.value,
-            localisation: localisation.value,
-            date_entree: date_entree.value,
-            origine: origine.value
-        })
-    }).then(()=>{pieceForm.reset();load();});
-});
+    fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: usernameInput.value,
+        password: passwordInput.value
+      })
+    })
+      .then(r => {
+        if (!r.ok) throw new Error("Login invalide");
+        return r.json();
+      })
+      .then(() => {
+        location.reload();
+      })
+      .catch(() => alert("Identifiants incorrects"));
+  };
+}
 
-function load(){
-    fetch("/api/pieces").then(r=>r.json()).then(data=>{
-        tablePieces.innerHTML="";
-        data.forEach(p=>{
-            tablePieces.innerHTML+=`
-            <tr>
-                <td>${p.id}</td>
-                <td>${p.identifiant}</td>
-                <td>${p.statut}</td>
-                <td>${p.qr_filename ? `<img src="/qr/${p.qr_filename}" width="50">`:"-"}</td>
-                <td><button onclick="hist(${p.id})">Voir</button></td>
-            </tr>`;
-        });
-    });
+if (logoutBtn) {
+  logoutBtn.onclick = () => {
+    fetch("/api/logout").then(() => location.reload());
+  };
+}
 
-    fetch("/api/indicateurs").then(r=>r.json()).then(k=>{
-        kpi.innerText = `Total: ${k.total} | Réparables: ${k.reparable}`;
+// ================== AJOUT PIECE ==================
+function addPiece() {
+  fetch("/api/piece", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      identifiant: identifiant.value,
+      type_piece: type.value,
+      statut: statut.value,
+      localisation: localisation.value,
+      date_entree: date.value,
+      origine: origine.value,
+      taux_endommagement: taux.value,
+      commentaire: commentaire.value
+    })
+  })
+    .then(r => {
+      if (!r.ok) throw new Error("Erreur ajout");
+      return r.json();
+    })
+    .then(() => {
+      addForm.reset();
+      loadPieces();
+      loadIndicateurs();
+    })
+    .catch(() => alert("Erreur lors de l’ajout"));
+}
+
+// ================== LISTE PIECES ==================
+function loadPieces() {
+  fetch("/api/pieces")
+    .then(r => r.json())
+    .then(data => {
+      list.innerHTML = "";
+      data.forEach(p => {
+        list.innerHTML += `
+          <tr>
+            <td>${p.id}</td>
+            <td>${p.identifiant}</td>
+            <td>${p.statut}</td>
+            <td>
+              <img src="/qr/${p.qr_filename}" width="70">
+            </td>
+            <td>
+              <a href="/piece/${p.identifiant}">Voir</a>
+            </td>
+          </tr>
+        `;
+      });
     });
 }
 
-function hist(id){
-    fetch(`/api/historique/${id}`)
-    .then(r=>r.json())
-    .then(h=>{
-        let txt="Historique:\n";
-        h.forEach(e=>{
-            txt+=`${e.date_action} | ${e.role} | ${e.action} | ${e.commentaire}\n`;
-        });
-        alert(txt);
+// ================== INDICATEURS ==================
+function loadIndicateurs() {
+  fetch("/api/indicateurs")
+    .then(r => r.json())
+    .then(kpi => {
+      document.getElementById("total").textContent = kpi.total;
+      document.getElementById("reparable").textContent = kpi.reparable;
     });
 }
+
+// ================== INIT ==================
+checkMe();
