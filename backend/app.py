@@ -124,23 +124,49 @@ def add_piece():
 @app.route("/api/pieces")
 def list_pieces():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM piece ORDER BY id DESC").fetchall()
+    rows = conn.execute("""
+        SELECT 
+            id,
+            identifiant,
+            type_piece,
+            statut,
+            localisation,
+            date_entree,
+            origine,
+            qr_filename,
+            COALESCE(taux_endommagement, 0) AS taux_endommagement,
+            COALESCE(commentaire, '') AS commentaire
+        FROM piece
+    """).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
 
 @app.route("/api/piece/<identifiant>")
 def get_piece(identifiant):
     conn = get_db()
-    piece = conn.execute(
-        "SELECT * FROM piece WHERE identifiant=?",
-        (identifiant,)
-    ).fetchone()
+    piece = conn.execute("""
+        SELECT 
+            id,
+            identifiant,
+            type_piece,
+            statut,
+            localisation,
+            date_entree,
+            origine,
+            qr_filename,
+            COALESCE(taux_endommagement, 0) AS taux_endommagement,
+            COALESCE(commentaire, '') AS commentaire
+        FROM piece
+        WHERE identifiant=?
+    """, (identifiant,)).fetchone()
     conn.close()
 
     if not piece:
         return jsonify({"error": "Pièce introuvable"}), 404
 
     return jsonify(dict(piece))
+
 
 # ================= HISTORIQUE =================
 @app.route("/api/historique/<int:piece_id>")
