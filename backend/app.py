@@ -2,17 +2,18 @@ from flask import Flask, jsonify, request, send_from_directory, session
 import sqlite3, os, qrcode
 from werkzeug.security import check_password_hash
 
+# ================= PATHS =================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(BASE_DIR, "../frontend")
 QR_DIR = os.path.join(BASE_DIR, "qr")
 DB_PATH = os.path.join(BASE_DIR, "gpr.db")
-
 os.makedirs(QR_DIR, exist_ok=True)
 
+# ================= APP =================
 app = Flask(__name__)
-app.secret_key = "CHANGE_ME_IN_PROD"
+app.secret_key = "GPR_SECRET_PROD"
 
-# ---------- DB ----------
+# ================= DB =================
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -27,24 +28,28 @@ def log_action(piece_id, action, commentaire=""):
     conn.commit()
     conn.close()
 
-# ---------- AUTH ----------
+# ================= AUTH =================
 @app.route("/api/login", methods=["POST"])
 def login():
-    d = request.json
+    data = request.json
     conn = get_db()
-    u = conn.execute("SELECT * FROM users WHERE username=?", (d["username"],)).fetchone()
+    user = conn.execute(
+        "SELECT * FROM users WHERE username=?",
+        (data["username"],)
+    ).fetchone()
     conn.close()
 
-    if u and check_password_hash(u["password_hash"], d["password"]):
-        session["username"] = u["username"]
-        session["role"] = u["role"]
-        return jsonify({"role": u["role"]})
-    return jsonify({"error":"Login invalide"}), 401
+    if user and check_password_hash(user["password_hash"], data["password"]):
+        session["username"] = user["username"]
+        session["role"] = user["role"]
+        return jsonify({"role": user["role"]})
+
+    return jsonify({"error": "Identifiants invalides"}), 401
 
 @app.route("/api/logout")
 def logout():
     session.clear()
-    return jsonify({"ok":True})
+    return jsonify({"ok": True})
 
 @app.route("/api/me")
 def me():
@@ -53,7 +58,7 @@ def me():
         "role": session.get("role")
     })
 
-# ---------- STATIC ----------
+# ================= STATIC =================
 @app.route("/")
 def index():
     return send_from_directory(FRONTEND_DIR, "index.html")
@@ -63,105 +68,104 @@ def piece_page(identifiant):
     return send_from_directory(FRONTEND_DIR, "piece.html")
 
 @app.route("/css/<path:f>")
-def css(f): return send_from_directory(FRONTEND_DIR+"/css", f)
+def css_files(f):
+    return send_from_directory(os.path.join(FRONTEND_DIR, "css"), f)
 
 @app.route("/js/<path:f>")
-def js(f): return send_from_directory(FRONTEND_DIR+"/js", f)
+def js_files(f):
+    return send_from_directory(os.path.join(FRONTEND_DIR, "js"), f)
 
 @app.route("/img/<path:f>")
-def img(f): return send_from_directory(FRONTEND_DIR+"/img", f)
+def img_files(f):
+    return send_from_directory(os.path.join(FRONTEND_DIR, "img"), f)
 
 @app.route("/qr/<path:f>")
-def qr(f): return send_from_directory(QR_DIR, f)
+def qr_files(f):
+    return send_from_directory(QR_DIR, f)
 
-# ---------- PIECES ----------
+# ================= PIECES =================
 @app.route("/api/piece", methods=["POST"])
 def add_piece():
     if session.get("role") != "MAINT":
-        return jsonify({"error":"MAINT uniquement"}),403
+        return jsonify({"error": "Accès MAINT"}), 403
 
     d = request.json
     identifiant = d["identifiant"]
 
-    qr_name = f"{identifiant}.png"
+    qr_filename = f"{identifiant}.png"
     qr_url = f"{request.host_url.rstrip('/')}/piece/{identifiant}"
-    qrcode.make(qr_url).save(os.path.join(QR_DIR, qr_name))
+    qrcode.make(qr_url).save(os.path.join(QR_DIR, qr_filename))
 
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO piece
         (identifiant, type_piece, statut, localisation, date_entree, origine,
-         taux_endommagement, commentaire, qr_filename)
+         qr_filename, taux_endommagement, commentaire)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         identifiant,
-        d["type_piece"],
-        d["statut"],
-        d["localisation"],
-        d["date_entree"],
-        d["origine"],
-        d["taux_endommagement"],
-        d["commentaire"],
-        qr_name
+        d.get("type_piece"),
+        d.get("statut"),
+        d.get("localisation"),
+        d.get("date_entree"),
+        d.get("origine"),
+        qr_filename,
+        d.get("taux_endommagement"),
+        d.get("commentaire")
     ))
-    pid = cur.lastrowid
+    piece_id = cur.lastrowid
     conn.commit()
     conn.close()
 
-    log_action(pid, "CREATION", f"{d['taux_endommagement']}% | {d['commentaire']}")
-    return jsonify({"ok":True})
+    log_action(piece_id, "CREATION", "Création pièce + QR")
+
+    return jsonify({"ok": True})
 
 @app.route("/api/pieces")
-def pieces():
+def list_pieces():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM piece").fetchall()
+    rows = conn.execute("SELECT * FROM piece ORDER BY id DESC").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/piece/<identifiant>")
-def piece(identifiant):
+def get_piece(identifiant):
     conn = get_db()
-    p = conn.execute("SELECT * FROM piece WHERE identifiant=?", (identifiant,)).fetchone()
+    piece = conn.execute(
+        "SELECT * FROM piece WHERE identifiant=?",
+        (identifiant,)
+    ).fetchone()
     conn.close()
-    if not p: return jsonify({"error":"Pièce introuvable"}),404
-    return jsonify(dict(p))
 
-# ---------- HISTORIQUE ----------
-@app.route("/api/historique/<int:pid>")
-def hist(pid):
+    if not piece:
+        return jsonify({"error": "Pièce introuvable"}), 404
+
+    return jsonify(dict(piece))
+
+# ================= HISTORIQUE =================
+@app.route("/api/historique/<int:piece_id>")
+def historique(piece_id):
     conn = get_db()
     rows = conn.execute("""
         SELECT date_action, role, action, commentaire
-        FROM historique WHERE piece_id=?
+        FROM historique
+        WHERE piece_id=?
         ORDER BY date_action DESC
-    """,(pid,)).fetchall()
+    """, (piece_id,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
-# ---------- LOG ----------
-@app.route("/api/piece/<int:pid>/localisation", methods=["POST"])
-def update_loc(pid):
-    if session.get("role") != "LOG":
-        return jsonify({"error":"LOG uniquement"}),403
-
-    loc = request.json["localisation"]
-    conn = get_db()
-    old = conn.execute("SELECT localisation FROM piece WHERE id=?", (pid,)).fetchone()
-    conn.execute("UPDATE piece SET localisation=? WHERE id=?", (loc,pid))
-    conn.commit()
-    conn.close()
-
-    log_action(pid,"LOCALISATION",f"{old['localisation']} → {loc}")
-    return jsonify({"ok":True})
-
-# ---------- KPI ----------
+# ================= KPI =================
 @app.route("/api/indicateurs")
-def kpi():
+def indicateurs():
     conn = get_db()
-    t = conn.execute("SELECT COUNT(*) FROM piece").fetchone()[0]
-    r = conn.execute("SELECT COUNT(*) FROM piece WHERE statut='reparable'").fetchone()[0]
+    total = conn.execute("SELECT COUNT(*) FROM piece").fetchone()[0]
+    reparable = conn.execute(
+        "SELECT COUNT(*) FROM piece WHERE statut='reparable'"
+    ).fetchone()[0]
     conn.close()
-    return jsonify({"total":t,"reparable":r})
+    return jsonify({"total": total, "reparable": reparable})
 
+# ================= RUN =================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)))
