@@ -13,32 +13,77 @@
 </div>
 
 <div class="container">
+
   <div class="card">
-    <h2 id="titre"></h2>
+    <p><b>Identifiant :</b> <span id="identifiant"></span></p>
     <p><b>Type :</b> <span id="type"></span></p>
     <p><b>Statut :</b> <span id="statut"></span></p>
-    <p><b>Localisation :</b> <span id="loc"></span></p>
+    <p><b>Localisation :</b> <span id="localisation"></span></p>
     <p><b>Date entrée :</b> <span id="date"></span></p>
     <p><b>Origine :</b> <span id="origine"></span></p>
   </div>
 
   <div class="card">
     <h2>Historique</h2>
-    <pre id="hist" style="white-space:pre-wrap;"></pre>
+    <ul id="historique"></ul>
   </div>
-  <div class="card" id="logBlock" style="display:none;">
-  <h2>Mise à jour localisation (LOG)</h2>
-  <input id="newLoc" placeholder="Nouvelle localisation">
-  <button onclick="updateLoc()">Valider</button>
-  <p id="locMsg"></p>
-</div>
-
 
   <div class="card">
-    <a href="/">⬅ Retour à la plateforme</a>
+    <a href="/">⬅ Retour plateforme</a>
   </div>
+
 </div>
 
-<script src="/js/piece.js"></script>
+<script>
+console.log("JS fiche pièce chargé");
+
+const identifiant = window.location.pathname.split("/").pop();
+console.log("Identifiant:", identifiant);
+
+// 1️⃣ Charger la pièce
+fetch(`/api/piece/${identifiant}`)
+  .then(res => res.json())
+  .then(piece => {
+    console.log("Pièce reçue:", piece);
+
+    if (piece.error) {
+      alert(piece.error);
+      return;
+    }
+
+    // Affichage infos
+    document.getElementById("identifiant").textContent = piece.identifiant;
+    document.getElementById("type").textContent = piece.type_piece || "-";
+    document.getElementById("statut").textContent = piece.statut || "-";
+    document.getElementById("localisation").textContent = piece.localisation || "-";
+    document.getElementById("date").textContent = piece.date_entree || "-";
+    document.getElementById("origine").textContent = piece.origine || "-";
+
+    // 2️⃣ Charger l’historique AVEC piece.id
+    fetch(`/api/historique/${piece.id}`)
+      .then(res => res.json())
+      .then(hist => {
+        console.log("Historique:", hist);
+        const ul = document.getElementById("historique");
+        ul.innerHTML = "";
+
+        if (hist.length === 0) {
+          ul.innerHTML = "<li>Aucun historique</li>";
+        }
+
+        hist.forEach(h => {
+          const li = document.createElement("li");
+          li.textContent =
+            `${h.date_action} – ${h.role} – ${h.action} (${h.commentaire})`;
+          ul.appendChild(li);
+        });
+      });
+  })
+  .catch(err => {
+    console.error("Erreur JS:", err);
+    alert("Erreur chargement fiche pièce");
+  });
+</script>
+
 </body>
 </html>
