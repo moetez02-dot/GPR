@@ -1,15 +1,90 @@
-<input id="identifiant">
-<input id="type">
-<select id="statut">
-  <option value="reparable">Réparable</option>
-  <option value="non_reparable">Non réparable</option>
-</select>
-<input id="localisation">
-<input id="date" type="date">
-<input id="origine">
-<input id="taux" type="number" min="0" max="100" placeholder="% endommagement">
-<input id="commentaire" placeholder="Commentaire">
-<button onclick="addPiece()">Ajouter</button>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>GPR – Gestion des Pièces Rebutées</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
 
-<div id="list"></div>
+<div class="header">
+  <img src="/img/alstom.png" style="height:55px;">
+  <h1>GPR – Gestion des Pièces Rebutées</h1>
+</div>
+
+<div class="container">
+
+  <!-- LOGIN -->
+  <div class="card" id="loginCard">
+    <h2>Connexion</h2>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <input id="username" placeholder="Utilisateur (MAINT / LOG / ACH / ENG)">
+      <input id="password" type="password" placeholder="Mot de passe">
+      <button id="btnLogin">Connexion</button>
+    </div>
+    <p id="loginMsg"></p>
+  </div>
+
+  <!-- SESSION -->
+  <div class="card" id="sessionCard" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div>Connecté : <b id="who"></b></div>
+      <button id="btnLogout">Déconnexion</button>
+    </div>
+  </div>
+
+  <!-- INDICATEURS -->
+  <div class="card" id="kpiCard" style="display:none;">
+    <h2>Indicateurs</h2>
+    <p id="kpis"></p>
+  </div>
+
+  <!-- MAINT: AJOUT PIECE -->
+  <div class="card" id="maintCard" style="display:none;">
+    <h2>Ajouter une pièce (MAINT)</h2>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <input id="identifiant" placeholder="Identifiant">
+      <input id="type_piece" placeholder="Type de pièce">
+      <select id="statut">
+        <option value="reparable">Réparable</option>
+        <option value="non_reparable">Non réparable</option>
+        <option value="cannibalisable">Cannibalisable</option>
+      </select>
+      <input id="date_entree" type="date">
+      <input id="origine" placeholder="Origine (train, atelier...)">
+      <input id="taux_endommagement" type="number" min="0" max="100" placeholder="% endommagement">
+      <input id="commentaire" placeholder="Commentaire">
+      <button id="btnAdd">Ajouter</button>
+    </div>
+    <p id="addMsg"></p>
+    <p style="font-size:13px; opacity:0.8;">
+      ⚠️ La localisation + QR seront faits par LOG.
+    </p>
+  </div>
+
+  <!-- TABLE PIECES -->
+  <div class="card" id="listCard" style="display:none;">
+    <h2>Stock commun</h2>
+    <div style="overflow:auto;">
+      <table class="table" style="width:100%;">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Identifiant</th>
+            <th>Statut</th>
+            <th>Localisation</th>
+            <th>QR</th>
+            <th>Fiche</th>
+            <th id="thLog" style="display:none;">MAJ localisation (LOG)</th>
+          </tr>
+        </thead>
+        <tbody id="piecesBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
 <script src="/js/app.js"></script>
+</body>
+</html>

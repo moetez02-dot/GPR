@@ -8,61 +8,47 @@
 <body>
 
 <div class="header">
-  <img src="/img/alstom.png" height="40">
+  <img src="/img/alstom.png" style="height:45px;">
   <h1>Fiche pièce</h1>
 </div>
 
 <div class="container">
+
   <div class="card">
-    <p><b>Type :</b> <span id="type"></span></p>
-    <p><b>Statut :</b> <span id="statut"></span></p>
-    <p><b>Localisation :</b> <span id="localisation"></span></p>
-    <p><b>Date entrée :</b> <span id="date"></span></p>
-    <p><b>Origine :</b> <span id="origine"></span></p>
-    <p><b>Taux d’endommagement :</b> <span id="taux"></span>%</p>
-    <p><b>Commentaire :</b> <span id="commentaire"></span></p>
+    <h2>Informations</h2>
+    <p><b>Identifiant :</b> <span id="identifiant">-</span></p>
+    <p><b>Type :</b> <span id="type">-</span></p>
+    <p><b>Statut :</b> <span id="statut">-</span></p>
+    <p><b>Localisation :</b> <span id="localisation">-</span></p>
+    <p><b>Date entrée :</b> <span id="date">-</span></p>
+    <p><b>Origine :</b> <span id="origine">-</span></p>
+    <p><b>Taux d’endommagement :</b> <span id="taux">-</span> %</p>
+    <p><b>Commentaire :</b> <span id="commentaire">-</span></p>
+
+    <div id="qrBlock" style="margin-top:12px; display:none;">
+      <b>QR :</b><br>
+      <img id="qrImg" width="120" alt="QR">
+    </div>
+  </div>
+
+  <div class="card" id="logBlock" style="display:none;">
+    <h2>Mise à jour localisation (LOG)</h2>
+    <input id="newLoc" placeholder="Nouvelle localisation">
+    <button id="btnLoc">Valider</button>
+    <p id="locMsg"></p>
   </div>
 
   <div class="card">
     <h2>Historique</h2>
-    <pre id="hist"></pre>
+    <ul id="histList"></ul>
   </div>
 
   <div class="card">
     <a href="/">⬅ Retour à la plateforme</a>
   </div>
+
 </div>
 
-<script>
-const identifiant = window.location.pathname.split("/").pop();
-
-fetch(`/api/piece/${identifiant}`)
-  .then(r => r.json())
-  .then(p => {
-    if (p.error) {
-      alert("Pièce introuvable");
-      return;
-    }
-
-    type.textContent = p.type_piece ?? "-";
-    statut.textContent = p.statut ?? "-";
-    localisation.textContent = p.localisation ?? "-";
-    date.textContent = p.date_entree ?? "-";
-    origine.textContent = p.origine ?? "-";
-    taux.textContent = p.taux_endommagement ?? "-";
-    commentaire.textContent = p.commentaire ?? "-";
-
-    fetch(`/api/historique/${p.id}`)
-      .then(r => r.json())
-      .then(h => {
-        hist.textContent = "";
-        h.forEach(l => {
-          hist.textContent +=
-            `${l.date_action} | ${l.role} | ${l.action} | ${l.commentaire}\n`;
-        });
-      });
-  });
-</script>
-
+<script src="/js/piece.js"></script>
 </body>
 </html>
