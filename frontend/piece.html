@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Fiche pièce</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<div class="header">
+  <img src="/img/alstom.png" style="height:45px;">
+  <h1>Fiche pièce</h1>
+</div>
+
+<div class="container">
+  <div class="card">
+    <h2 id="titre"></h2>
+    <p><b>Type :</b> <span id="type"></span></p>
+    <p><b>Statut :</b> <span id="statut"></span></p>
+    <p><b>Localisation :</b> <span id="loc"></span></p>
+    <p><b>Date entrée :</b> <span id="date"></span></p>
+    <p><b>Origine :</b> <span id="origine"></span></p>
+  </div>
+
+  <div class="card">
+    <h2>Historique</h2>
+    <pre id="hist" style="white-space:pre-wrap;"></pre>
+  </div>
+  <div class="card" id="logBlock" style="display:none;">
+  <h2>Mise à jour localisation (LOG)</h2>
+  <input id="newLoc" placeholder="Nouvelle localisation">
+  <button onclick="updateLoc()">Valider</button>
+  <p id="locMsg"></p>
+</div>
+
+
+  <div class="card">
+    <a href="/">⬅ Retour à la plateforme</a>
+  </div>
+</div>
+
+<script src="/js/piece.js"></script>
+</body>
+</html>

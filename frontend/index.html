@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>GPR</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<div class="header">
+    <img src="/img/alstom.png">
+    <h1>GPR – Gestion des Pièces Rebutées</h1>
+</div>
+
+<div class="container">
+
+<div class="card" id="loginCard">
+    <h2>Connexion</h2>
+    <input id="loginUser" placeholder="main / log / achat / inge">
+    <input id="loginPass" type="password">
+    <button onclick="login()">Connexion</button>
+    <p id="loginError"></p>
+</div>
+
+<div id="appContent" style="display:none;">
+
+<div class="card">
+    Connecté : <b id="roleDisplay"></b>
+    <button onclick="logout()">Déconnexion</button>
+</div>
+
+<div class="card" id="maintenanceBlock">
+    <h2>Ajouter une pièce</h2>
+    <form id="pieceForm">
+        <input id="identifiant" placeholder="Identifiant" required>
+        <input id="type_piece" placeholder="Type de pièce">
+        <select id="statut">
+            <option value="reparable">Réparable</option>
+            <option value="non_reparable">Non réparable</option>
+            <option value="cannibalisable">Cannibalisable</option>
+        </select>
+        <input id="localisation" placeholder="Localisation">
+        <input id="date_entree" type="date">
+        <input id="origine" placeholder="Origine">
+        <button>Ajouter</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Indicateurs</h2>
+    <p id="kpi"></p>
+</div>
+
+<div class="card">
+    <h2>Liste des pièces</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Identifiant</th>
+                <th>Statut</th>
+                <th>QR</th>
+                <th>Historique</th>
+            </tr>
+        </thead>
+        <tbody id="tablePieces"></tbody>
+    </table>
+</div>
+
+</div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
