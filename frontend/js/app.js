@@ -1,69 +1,98 @@
-const roleSpan = document.getElementById("role");
-const list = document.getElementById("list");
+let role = null;
+const $ = id => document.getElementById(id);
 
-// ================== SESSION ==================
-fetch("/api/me").then(r => r.json()).then(u => {
-  if (!u.role) return;
-  roleSpan.textContent = u.role;
-  loadPieces();
-});
+async function api(url, opt={}) {
+  const r = await fetch(url, opt);
+  const d = await r.json();
+  if (!r.ok) throw d;
+  return d;
+}
 
-// ================== AJOUT PIECE (MAINT) ==================
-function addPiece() {
-  fetch("/api/piece", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      identifiant: identifiant.value,
-      type_piece: type.value,
-      statut: statut.value,
-      date_entree: date.value,
-      origine: origine.value,
-      taux_endommagement: taux.value,
-      commentaire: commentaire.value
+async function refresh() {
+  const me = await api("/api/me");
+  role = me.role;
+
+  $("login").style.display = role ? "none" : "";
+  $("main").style.display = role ? "" : "none";
+  $("who").textContent = role || "";
+
+  if (role) {
+    loadKpis();
+    loadPieces();
+  }
+}
+
+async function login() {
+  try {
+    await api("/api/login", {
+      method:"POST",
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        username:$("user").value,
+        password:$("pass").value
+      })
+    });
+    refresh();
+  } catch {
+    alert("Login incorrect");
+  }
+}
+
+async function logout() {
+  await api("/api/logout");
+  refresh();
+}
+
+async function loadKpis() {
+  const k = await api("/api/indicateurs");
+  $("kpis").textContent =
+    `Total ${k.total} | Rep ${k.reparable} | Non rep ${k.non_reparable} | Cann ${k.cannibalisable}`;
+}
+
+async function addPiece() {
+  await api("/api/piece", {
+    method:"POST",
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      identifiant:$("id").value,
+      type_piece:$("type").value,
+      statut:$("statut").value,
+      date_entree:$("date").value,
+      origine:$("origine").value,
+      taux_endommagement:$("taux").value,
+      commentaire:$("com").value
     })
-  })
-  .then(r => r.json())
-  .then(res => {
-    if (res.error) alert(res.error);
-    else location.reload();
   });
+  loadPieces();
 }
 
-// ================== LOCALISATION (LOG) ==================
-function updateLoc(id) {
-  const val = document.getElementById("loc-" + id).value;
-
-  fetch(`/api/piece/${id}/localisation`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ localisation: val })
-  })
-  .then(r => r.json())
-  .then(res => {
-    if (res.error) alert(res.error);
-    else location.reload();
+async function setLoc(pid) {
+  const v = document.getElementById("loc_"+pid).value;
+  await api(`/api/piece/${pid}/localisation`, {
+    method:"POST",
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({localisation:v})
   });
+  loadPieces();
 }
 
-// ================== LISTE ==================
-function loadPieces() {
-  fetch("/api/pieces").then(r => r.json()).then(data => {
-    list.innerHTML = "";
-    data.forEach(p => {
-      list.innerHTML += `
+async function loadPieces() {
+  const data = await api("/api/pieces");
+  const b = $("rows");
+  b.innerHTML = "";
+  data.forEach(p=>{
+    b.innerHTML += `
       <tr>
         <td>${p.id}</td>
         <td>${p.identifiant}</td>
         <td>${p.statut}</td>
-        <td>${p.localisation || "—"}</td>
+        <td>${p.localisation||"—"}</td>
         <td>${p.qr_filename ? `<img src="/qr/${p.qr_filename}" width="60">` : "—"}</td>
         <td><a href="/piece/${p.identifiant}">Voir</a></td>
-        <td>
-          <input id="loc-${p.id}" placeholder="Localisation">
-          <button onclick="updateLoc(${p.id})">Valider</button>
-        </td>
-      </tr>`;
-    });
+        ${role==="LOG" ? `<td><input id="loc_${p.id}"><button onclick="setLoc(${p.id})">OK</button></td>` : ""}
+      </tr>
+    `;
   });
 }
+
+document.addEventListener("DOMContentLoaded", refresh);
