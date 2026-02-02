@@ -1,27 +1,33 @@
 from flask import Flask, jsonify, request, send_from_directory, session
-from werkzeug.security import check_password_hash
-import sqlite3, os, qrcode
+from werkzeug.security import check_password_hash, generate_password_hash
+import sqlite3
+import os
+import qrcode
+import uuid
 
+# ================== PATHS ==================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(BASE_DIR, "../frontend")
 DB_PATH = os.path.join(BASE_DIR, "gpr.db")
 QR_DIR = os.path.join(BASE_DIR, "qr")
 os.makedirs(QR_DIR, exist_ok=True)
 
+# ================== APP ==================
 app = Flask(__name__)
-app.secret_key = "DEV_ONLY_CHANGE_ME"
+app.secret_key = os.environ.get("SECRET_KEY", "DEV_ONLY_CHANGE_ME")
 
-# ---------- DB ----------
+# ================== DB ==================
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
+# ================== SCHEMA ==================
 def ensure_schema():
     conn = get_db()
 
     conn.execute("""
-    CREATE TABLE IF NOT EXISTS piece(
+    CREATE TABLE IF NOT EXISTS piece (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         identifiant TEXT UNIQUE NOT NULL,
         type_piece TEXT,
@@ -36,7 +42,7 @@ def ensure_schema():
     """)
 
     conn.execute("""
-    CREATE TABLE IF NOT EXISTS historique(
+    CREATE TABLE IF NOT EXISTS historique (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         piece_id INTEGER,
         action TEXT,
@@ -47,7 +53,7 @@ def ensure_schema():
     """)
 
     conn.execute("""
-    CREATE TABLE IF NOT EXISTS users(
+    CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
         password_hash TEXT,
@@ -58,41 +64,59 @@ def ensure_schema():
     conn.commit()
     conn.close()
 
-ensure_schema()
+def ensure_default_users():
+    conn = get_db()
+    users = [
+        ("main", generate_password_hash("main123"), "MAINT"),
+        ("log", generate_password_hash("log123"), "LOG")
+    ]
+    for u in users:
+        conn.execute(
+            "INSERT OR IGNORE INTO users(username,password_hash,role) VALUES (?,?,?)",
+            u
+        )
+    conn.commit()
+    conn.close()
 
 def log_action(piece_id, action, commentaire=""):
     conn = get_db()
     conn.execute("""
         INSERT INTO historique(piece_id, action, date_action, role, commentaire)
         VALUES (?, ?, datetime('now'), ?, ?)
-    """, (piece_id, action, session.get("role", "SYSTEM"), commentaire))
+    """, (piece_id, action, session.get("role", "PUBLIC"), commentaire))
     conn.commit()
     conn.close()
 
-def require_role(role):
+def require_role(*roles):
     def deco(fn):
         def wrapper(*args, **kwargs):
-            if session.get("role") != role:
+            if session.get("role") not in roles:
                 return jsonify({"error": "Accès interdit"}), 403
             return fn(*args, **kwargs)
         wrapper.__name__ = fn.__name__
         return wrapper
     return deco
 
-# ---------- AUTH ----------
+ensure_schema()
+ensure_default_users()
+
+# ================== AUTH ==================
 @app.route("/api/login", methods=["POST"])
 def login():
-    d = request.json
+    data = request.json or {}
     conn = get_db()
-    u = conn.execute("SELECT * FROM users WHERE username=?", (d["username"],)).fetchone()
+    user = conn.execute(
+        "SELECT * FROM users WHERE username=?",
+        (data.get("username"),)
+    ).fetchone()
     conn.close()
 
-    if u and check_password_hash(u["password_hash"], d["password"]):
-        session["username"] = u["username"]
-        session["role"] = u["role"]
-        return jsonify({"ok": True, "role": u["role"]})
+    if user and check_password_hash(user["password_hash"], data.get("password")):
+        session["username"] = user["username"]
+        session["role"] = user["role"]
+        return jsonify({"ok": True, "role": user["role"]})
 
-    return jsonify({"error": "Login invalide"}), 401
+    return jsonify({"error": "Identifiants invalides"}), 401
 
 @app.route("/api/logout")
 def logout():
@@ -106,7 +130,7 @@ def me():
         "role": session.get("role")
     })
 
-# ---------- STATIC ----------
+# ================== STATIC ==================
 @app.route("/")
 def index():
     return send_from_directory(FRONTEND_DIR, "index.html")
@@ -116,42 +140,68 @@ def piece_page(identifiant):
     return send_from_directory(FRONTEND_DIR, "piece.html")
 
 @app.route("/css/<path:f>")
-def css(f):
+def css_files(f):
     return send_from_directory(os.path.join(FRONTEND_DIR, "css"), f)
 
 @app.route("/js/<path:f>")
-def js(f):
+def js_files(f):
     return send_from_directory(os.path.join(FRONTEND_DIR, "js"), f)
 
 @app.route("/img/<path:f>")
-def img(f):
+def img_files(f):
     return send_from_directory(os.path.join(FRONTEND_DIR, "img"), f)
 
 @app.route("/qr/<path:f>")
-def qr(f):
+def qr_files(f):
     return send_from_directory(QR_DIR, f)
 
-# ---------- API ----------
+# ================== API PUBLIC ==================
 @app.route("/api/pieces")
-def pieces():
+def list_pieces():
     conn = get_db()
     rows = conn.execute("SELECT * FROM piece ORDER BY id DESC").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/piece/<identifiant>")
-def piece(identifiant):
+def get_piece(identifiant):
     conn = get_db()
-    p = conn.execute("SELECT * FROM piece WHERE identifiant=?", (identifiant,)).fetchone()
+    piece = conn.execute(
+        "SELECT * FROM piece WHERE identifiant=?",
+        (identifiant,)
+    ).fetchone()
     conn.close()
-    if not p:
-        return jsonify({"error": "introuvable"}), 404
-    return jsonify(dict(p))
+    if not piece:
+        return jsonify({"error": "Introuvable"}), 404
+    return jsonify(dict(piece))
 
+@app.route("/api/historique/<int:piece_id>")
+def historique_piece(piece_id):
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT date_action, role, action, commentaire
+        FROM historique WHERE piece_id=?
+        ORDER BY date_action DESC
+    """, (piece_id,)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+# ================== MAINT ==================
 @app.route("/api/piece", methods=["POST"])
 @require_role("MAINT")
 def add_piece():
-    d = request.json
+    d = request.json or {}
+
+    identifiant = f"P-{uuid.uuid4().hex[:8].upper()}"
+    qr_filename = f"{identifiant}.png"
+
+    public_base = os.environ.get(
+        "PUBLIC_BASE_URL",
+        request.url_root.rstrip("/")
+    )
+    qr_url = f"{public_base}/piece/{identifiant}"
+    qrcode.make(qr_url).save(os.path.join(QR_DIR, qr_filename))
+
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO piece(
@@ -159,66 +209,71 @@ def add_piece():
             date_entree, origine, qr_filename,
             taux_endommagement, commentaire
         )
-        VALUES (?, ?, ?, NULL, ?, ?, NULL, ?, ?)
+        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)
     """, (
-        d["identifiant"], d["type_piece"], d["statut"],
-        d["date_entree"], d["origine"],
-        d["taux_endommagement"], d["commentaire"]
+        identifiant,
+        d.get("type_piece"),
+        d.get("statut"),
+        d.get("date_entree"),
+        d.get("origine"),
+        qr_filename,
+        int(d.get("taux_endommagement") or 0),
+        d.get("commentaire")
     ))
-    pid = cur.lastrowid
+    piece_id = cur.lastrowid
     conn.commit()
     conn.close()
 
-    log_action(pid, "CREATION", "Créée par MAINT")
-    return jsonify({"ok": True})
+    log_action(piece_id, "CREATION", "Création + QR (MAINT)")
 
-@app.route("/api/piece/<int:pid>/localisation", methods=["POST"])
+    return jsonify({"ok": True, "identifiant": identifiant})
+
+# ================== LOG ==================
+@app.route("/api/piece/<int:piece_id>/localisation", methods=["POST"])
 @require_role("LOG")
-def set_loc(pid):
-    loc = request.json["localisation"]
+def update_localisation(piece_id):
+    d = request.json or {}
+    loc = d.get("localisation")
+    com = d.get("commentaire", "")
+
+    if not loc:
+        return jsonify({"error": "Localisation obligatoire"}), 400
+
     conn = get_db()
-    p = conn.execute("SELECT identifiant FROM piece WHERE id=?", (pid,)).fetchone()
-
-    if not p:
-        return jsonify({"error": "introuvable"}), 404
-
-    qr_file = f"{p['identifiant']}.png"
-    qrcode.make(f"{request.host_url}piece/{p['identifiant']}").save(os.path.join(QR_DIR, qr_file))
-
-    conn.execute("""
-        UPDATE piece SET localisation=?, qr_filename=?
-        WHERE id=?
-    """, (loc, qr_file, pid))
+    conn.execute(
+        "UPDATE piece SET localisation=? WHERE id=?",
+        (loc, piece_id)
+    )
     conn.commit()
     conn.close()
 
-    log_action(pid, "LOCALISATION", loc)
+    log_action(piece_id, "LOCALISATION", com or loc)
+
     return jsonify({"ok": True})
 
-@app.route("/api/historique/<int:pid>")
-def hist(pid):
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT date_action, role, action, commentaire
-        FROM historique WHERE piece_id=?
-        ORDER BY date_action DESC
-    """, (pid,)).fetchall()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
-
+# ================== KPI ==================
 @app.route("/api/indicateurs")
-def kpis():
+def indicateurs():
     conn = get_db()
-    r = conn.execute("""
-        SELECT
-        COUNT(*) total,
-        SUM(statut='reparable') reparable,
-        SUM(statut='non_reparable') non_reparable,
-        SUM(statut='cannibalisable') cannibalisable
-        FROM piece
-    """).fetchone()
+    total = conn.execute("SELECT COUNT(*) FROM piece").fetchone()[0]
+    rep = conn.execute("SELECT COUNT(*) FROM piece WHERE statut='reparable'").fetchone()[0]
+    nrep = conn.execute("SELECT COUNT(*) FROM piece WHERE statut='non_reparable'").fetchone()[0]
+    cann = conn.execute("SELECT COUNT(*) FROM piece WHERE statut='cannibalisable'").fetchone()[0]
     conn.close()
-    return jsonify(dict(r))
+    return jsonify({
+        "total": total,
+        "reparable": rep,
+        "non_reparable": nrep,
+        "cannibalisable": cann
+    })
+@app.route("/api/debug/init-users")
+def debug_init_users():
+    ensure_default_users()
+    return jsonify({
+        "ok": True,
+        "users": ["main / MAINT", "log / LOG"]
+    })
 
+# ================== RUN ==================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
