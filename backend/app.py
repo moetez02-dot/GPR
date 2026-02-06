@@ -1,37 +1,43 @@
+# ================== IMPORTS ==================
 from flask import Flask, jsonify, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_cors import CORS
 import sqlite3
 import os
-import qrcode
 import uuid
+import qrcode
 
 # ================== PATHS ==================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(BASE_DIR, "../frontend")
-DB_PATH = os.path.join(BASE_DIR, "gpr.db")
 QR_DIR = os.path.join(BASE_DIR, "qr")
 os.makedirs(QR_DIR, exist_ok=True)
 
-print("DB PATH =", DB_PATH)
-print("DB EXISTS =", os.path.exists(DB_PATH))
+# DB persistante (Render + Local)
+DB_PATH = os.environ.get("DATABASE_PATH") or os.path.join(BASE_DIR, "gpr.db")
+
+# URL publique pour QR
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL")
 
 # ================== APP ==================
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "DEV_ONLY_CHANGE_ME")
+app.secret_key = os.environ.get("SECRET_KEY", "gpr_secret_dev")
+
+# Cookies session (connexion multi-appareils)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True
+)
 
 CORS(app, supports_credentials=True)
 
-app.config.update(
-    SESSION_COOKIE_SECURE=True,
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="None"
-)
-
 # ================== DB ==================
 def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA journal_mode=WAL;")
     return conn
 
 # ================== SCHEMA ==================
@@ -76,6 +82,7 @@ def ensure_schema():
     conn.commit()
     conn.close()
 
+# ================== USERS ==================
 def ensure_default_users():
     conn = get_db()
 
@@ -84,15 +91,16 @@ def ensure_default_users():
         ("log", generate_password_hash("log123"), "LOG"),
     ]
 
-    for u, p, r in users:
+    for u in users:
         conn.execute(
             "INSERT OR IGNORE INTO users(username,password_hash,role) VALUES (?,?,?)",
-            (u, p, r)
+            u
         )
 
     conn.commit()
     conn.close()
 
+# ================== LOG ==================
 def log_action(piece_id, action, commentaire=""):
     conn = get_db()
     conn.execute("""
@@ -102,6 +110,7 @@ def log_action(piece_id, action, commentaire=""):
     conn.commit()
     conn.close()
 
+# ================== ROLE ==================
 def require_role(*roles):
     def deco(fn):
         def wrapper(*args, **kwargs):
@@ -112,6 +121,7 @@ def require_role(*roles):
         return wrapper
     return deco
 
+# Init DB
 ensure_schema()
 ensure_default_users()
 
@@ -134,10 +144,12 @@ def login():
 
     return jsonify({"error": "Identifiants invalides"}), 401
 
+
 @app.route("/api/logout")
 def logout():
     session.clear()
     return jsonify({"ok": True})
+
 
 @app.route("/api/me")
 def me():
@@ -145,21 +157,6 @@ def me():
         "username": session.get("username"),
         "role": session.get("role")
     })
-
-# ================== DEBUG ==================
-@app.route("/api/debug/users")
-def debug_users():
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT username, role FROM users"
-    ).fetchall()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
-
-@app.route("/api/debug/init-users")
-def debug_init_users():
-    ensure_default_users()
-    return jsonify({"ok": True})
 
 # ================== STATIC ==================
 @app.route("/")
@@ -186,7 +183,7 @@ def img_files(f):
 def qr_files(f):
     return send_from_directory(QR_DIR, f)
 
-# ================== PIECES ==================
+# ================== API ==================
 @app.route("/api/pieces")
 def list_pieces():
     conn = get_db()
@@ -194,6 +191,21 @@ def list_pieces():
     conn.close()
     return jsonify([dict(r) for r in rows])
 
+@app.route("/api/piece/<identifiant>")
+def get_piece(identifiant):
+    conn = get_db()
+    piece = conn.execute(
+        "SELECT * FROM piece WHERE identifiant=?",
+        (identifiant,)
+    ).fetchone()
+    conn.close()
+
+    if not piece:
+        return jsonify({"error": "Introuvable"}), 404
+
+    return jsonify(dict(piece))
+
+# ================== MAINT ==================
 @app.route("/api/piece", methods=["POST"])
 @require_role("MAINT")
 def add_piece():
@@ -202,26 +214,24 @@ def add_piece():
     identifiant = f"P-{uuid.uuid4().hex[:8].upper()}"
     qr_filename = f"{identifiant}.png"
 
-    public_base = os.environ.get(
-        "PUBLIC_BASE_URL",
-        request.url_root.rstrip("/")
-    )
+    base_url = (PUBLIC_BASE_URL or request.url_root).rstrip("/")
+    qr_url = f"{base_url}/piece/{identifiant}"
 
-    qr_url = f"{public_base}/piece/{identifiant}"
     qrcode.make(qr_url).save(os.path.join(QR_DIR, qr_filename))
 
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO piece(
-            identifiant, type_piece, statut,
-            localisation, date_entree, origine,
-            qr_filename, taux_endommagement, commentaire
+            identifiant,type_piece,statut,localisation,
+            date_entree,origine,qr_filename,
+            taux_endommagement,commentaire
         )
-        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)
+        VALUES (?,?,?,?,?,?,?,?,?)
     """, (
         identifiant,
         d.get("type_piece"),
         d.get("statut"),
+        None,
         d.get("date_entree"),
         d.get("origine"),
         qr_filename,
@@ -233,7 +243,7 @@ def add_piece():
     conn.commit()
     conn.close()
 
-    log_action(piece_id, "CREATION", "Création + QR")
+    log_action(piece_id, "CREATION", "Création + QR (MAINT)")
 
     return jsonify({"ok": True, "identifiant": identifiant})
 
@@ -243,6 +253,7 @@ def add_piece():
 def update_localisation(piece_id):
     d = request.json or {}
     loc = d.get("localisation")
+    com = d.get("commentaire", "")
 
     if not loc:
         return jsonify({"error": "Localisation obligatoire"}), 400
@@ -255,10 +266,19 @@ def update_localisation(piece_id):
     conn.commit()
     conn.close()
 
-    log_action(piece_id, "LOCALISATION", loc)
+    log_action(piece_id, "LOCALISATION", com or loc)
 
     return jsonify({"ok": True})
 
+# ================== DEBUG ==================
+@app.route("/api/debug/users")
+def debug_users():
+    conn = get_db()
+    rows = conn.execute("SELECT username,role FROM users").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
 # ================== RUN ==================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
