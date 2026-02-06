@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
+from flask_cors import CORS
 import sqlite3
 import os
 import qrcode
@@ -12,20 +13,20 @@ DB_PATH = os.path.join(BASE_DIR, "gpr.db")
 QR_DIR = os.path.join(BASE_DIR, "qr")
 os.makedirs(QR_DIR, exist_ok=True)
 
+print("DB PATH =", DB_PATH)
+print("DB EXISTS =", os.path.exists(DB_PATH))
+
 # ================== APP ==================
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "DEV_ONLY_CHANGE_ME")
+
+CORS(app, supports_credentials=True)
 
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="None"
 )
-
-from flask_cors import CORS
-CORS(app, supports_credentials=True)
-
-app.secret_key = os.environ.get("SECRET_KEY", "DEV_ONLY_CHANGE_ME")
 
 # ================== DB ==================
 def get_db():
@@ -74,20 +75,21 @@ def ensure_schema():
 
     conn.commit()
     conn.close()
-print("DB PATH =", DB_PATH)
-print("DB EXISTS =", os.path.exists(DB_PATH))
 
 def ensure_default_users():
     conn = get_db()
+
     users = [
         ("main", generate_password_hash("main123"), "MAINT"),
-        ("log", generate_password_hash("log123"), "LOG")
+        ("log", generate_password_hash("log123"), "LOG"),
     ]
-    for u in users:
+
+    for u, p, r in users:
         conn.execute(
             "INSERT OR IGNORE INTO users(username,password_hash,role) VALUES (?,?,?)",
-            u
+            (u, p, r)
         )
+
     conn.commit()
     conn.close()
 
@@ -117,6 +119,7 @@ ensure_default_users()
 @app.route("/api/login", methods=["POST"])
 def login():
     data = request.json or {}
+
     conn = get_db()
     user = conn.execute(
         "SELECT * FROM users WHERE username=?",
@@ -143,6 +146,21 @@ def me():
         "role": session.get("role")
     })
 
+# ================== DEBUG ==================
+@app.route("/api/debug/users")
+def debug_users():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT username, role FROM users"
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/debug/init-users")
+def debug_init_users():
+    ensure_default_users()
+    return jsonify({"ok": True})
+
 # ================== STATIC ==================
 @app.route("/")
 def index():
@@ -168,7 +186,7 @@ def img_files(f):
 def qr_files(f):
     return send_from_directory(QR_DIR, f)
 
-# ================== API PUBLIC ==================
+# ================== PIECES ==================
 @app.route("/api/pieces")
 def list_pieces():
     conn = get_db()
@@ -176,30 +194,6 @@ def list_pieces():
     conn.close()
     return jsonify([dict(r) for r in rows])
 
-@app.route("/api/piece/<identifiant>")
-def get_piece(identifiant):
-    conn = get_db()
-    piece = conn.execute(
-        "SELECT * FROM piece WHERE identifiant=?",
-        (identifiant,)
-    ).fetchone()
-    conn.close()
-    if not piece:
-        return jsonify({"error": "Introuvable"}), 404
-    return jsonify(dict(piece))
-
-@app.route("/api/historique/<int:piece_id>")
-def historique_piece(piece_id):
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT date_action, role, action, commentaire
-        FROM historique WHERE piece_id=?
-        ORDER BY date_action DESC
-    """, (piece_id,)).fetchall()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
-
-# ================== MAINT ==================
 @app.route("/api/piece", methods=["POST"])
 @require_role("MAINT")
 def add_piece():
@@ -212,15 +206,16 @@ def add_piece():
         "PUBLIC_BASE_URL",
         request.url_root.rstrip("/")
     )
+
     qr_url = f"{public_base}/piece/{identifiant}"
     qrcode.make(qr_url).save(os.path.join(QR_DIR, qr_filename))
 
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO piece(
-            identifiant, type_piece, statut, localisation,
-            date_entree, origine, qr_filename,
-            taux_endommagement, commentaire
+            identifiant, type_piece, statut,
+            localisation, date_entree, origine,
+            qr_filename, taux_endommagement, commentaire
         )
         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)
     """, (
@@ -233,11 +228,12 @@ def add_piece():
         int(d.get("taux_endommagement") or 0),
         d.get("commentaire")
     ))
+
     piece_id = cur.lastrowid
     conn.commit()
     conn.close()
 
-    log_action(piece_id, "CREATION", "Création + QR (MAINT)")
+    log_action(piece_id, "CREATION", "Création + QR")
 
     return jsonify({"ok": True, "identifiant": identifiant})
 
@@ -247,7 +243,6 @@ def add_piece():
 def update_localisation(piece_id):
     d = request.json or {}
     loc = d.get("localisation")
-    com = d.get("commentaire", "")
 
     if not loc:
         return jsonify({"error": "Localisation obligatoire"}), 400
@@ -260,45 +255,9 @@ def update_localisation(piece_id):
     conn.commit()
     conn.close()
 
-    log_action(piece_id, "LOCALISATION", com or loc)
+    log_action(piece_id, "LOCALISATION", loc)
 
     return jsonify({"ok": True})
-
-# ================== KPI ==================
-@app.route("/api/indicateurs")
-def indicateurs():
-    conn = get_db()
-    total = conn.execute("SELECT COUNT(*) FROM piece").fetchone()[0]
-    rep = conn.execute("SELECT COUNT(*) FROM piece WHERE statut='reparable'").fetchone()[0]
-    nrep = conn.execute("SELECT COUNT(*) FROM piece WHERE statut='non_reparable'").fetchone()[0]
-    cann = conn.execute("SELECT COUNT(*) FROM piece WHERE statut='cannibalisable'").fetchone()[0]
-    conn.close()
-    return jsonify({
-        "total": total,
-        "reparable": rep,
-        "non_reparable": nrep,
-        "cannibalisable": cann
-    })
-@app.route("/api/debug/init-users")
-def debug_init_users():
-    # ⚠️ À SUPPRIMER APRÈS INITIALISATION
-    conn = get_db()
-
-    users = [
-        ("main", generate_password_hash("main123"), "MAINT"),
-        ("log", generate_password_hash("log123"), "LOG"),
-    ]
-
-    for u, p, r in users:
-        conn.execute(
-            "INSERT OR IGNORE INTO users(username, password_hash, role) VALUES (?, ?, ?)",
-            (u, p, r)
-        )
-
-    conn.commit()
-    conn.close()
-
-    return jsonify({"ok": True, "message": "Utilisateurs initialisés"})
 
 # ================== RUN ==================
 if __name__ == "__main__":
