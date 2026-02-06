@@ -16,6 +16,17 @@ os.makedirs(QR_DIR, exist_ok=True)
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "DEV_ONLY_CHANGE_ME")
 
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="None"
+)
+
+from flask_cors import CORS
+CORS(app, supports_credentials=True)
+
+app.secret_key = os.environ.get("SECRET_KEY", "DEV_ONLY_CHANGE_ME")
+
 # ================== DB ==================
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=10)
@@ -63,6 +74,8 @@ def ensure_schema():
 
     conn.commit()
     conn.close()
+print("DB PATH =", DB_PATH)
+print("DB EXISTS =", os.path.exists(DB_PATH))
 
 def ensure_default_users():
     conn = get_db()
@@ -268,11 +281,24 @@ def indicateurs():
     })
 @app.route("/api/debug/init-users")
 def debug_init_users():
-    ensure_default_users()
-    return jsonify({
-        "ok": True,
-        "users": ["main / MAINT", "log / LOG"]
-    })
+    # ⚠️ À SUPPRIMER APRÈS INITIALISATION
+    conn = get_db()
+
+    users = [
+        ("main", generate_password_hash("main123"), "MAINT"),
+        ("log", generate_password_hash("log123"), "LOG"),
+    ]
+
+    for u, p, r in users:
+        conn.execute(
+            "INSERT OR IGNORE INTO users(username, password_hash, role) VALUES (?, ?, ?)",
+            (u, p, r)
+        )
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({"ok": True, "message": "Utilisateurs initialisés"})
 
 # ================== RUN ==================
 if __name__ == "__main__":
